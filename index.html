@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR Fraction Balance - เกม AR ตาชั่งเศษส่วน</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js for 3D AR Graphics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Font Prompt -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .scale-btn {
+            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .scale-btn:active {
+            transform: scale(0.9);
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+        }
+        .floating-anim {
+            animation: float 3s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-800 h-screen w-screen overflow-hidden flex flex-col justify-between">
+
+    <!-- Webcam Background Stream for AR mode -->
+    <video id="webcam" autoplay playsinline muted class="fixed inset-0 w-full h-full object-cover z-0 hidden"></video>
+
+    <!-- Simulated AR Grid Background (Used when camera is off or disabled) -->
+    <div id="simulated-ar" class="fixed inset-0 z-0 bg-gradient-to-b from-indigo-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div class="absolute inset-0 opacity-20 bg-[radial-gradient(#6366f1_1px,transparent_1px)] [background-size:24px_24px]"></div>
+    </div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container" class="fixed inset-0 z-10 pointer-events-auto"></div>
+
+    <!-- UI Header -->
+    <header class="relative z-20 p-4 flex justify-between items-center max-w-4xl mx-auto w-full">
+        <!-- Brand & Level -->
+        <div class="glass-panel px-4 py-2 rounded-2xl shadow-lg flex items-center gap-3">
+            <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xl shadow-md font-bold">
+                <i class="fa-solid fa-scale-balanced"></i>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold text-slate-900 leading-tight">ตาชั่งเศษส่วน AR</h1>
+                <p id="level-title" class="text-xs text-indigo-600 font-semibold">ด่านที่ 1: ตัวส่วนเท่ากัน</p>
+            </div>
+        </div>
+
+        <!-- Score & AR Toggle -->
+        <div class="flex items-center gap-2">
+            <!-- Score Badge -->
+            <div class="glass-panel px-4 py-2 rounded-2xl shadow-lg flex items-center gap-2">
+                <i class="fa-solid fa-star text-amber-500 text-lg"></i>
+                <span id="score-text" class="font-bold text-lg text-slate-800">0</span>
+            </div>
+
+            <!-- Toggle AR Camera -->
+            <button id="btn-toggle-ar" onclick="toggleARCamera()" class="glass-panel p-3 rounded-2xl shadow-lg text-slate-700 hover:text-indigo-600 hover:bg-white transition flex items-center justify-center w-11 h-11" title="เปิด/ปิดกล้อง AR">
+                <i class="fa-solid fa-camera text-lg"></i>
+            </button>
+
+            <!-- Refresh/Restart -->
+            <button onclick="generateQuestion()" class="glass-panel p-3 rounded-2xl shadow-lg text-slate-700 hover:text-indigo-600 hover:bg-white transition flex items-center justify-center w-11 h-11" title="สุ่มโจทย์ใหม่">
+                <i class="fa-solid fa-rotate-right text-lg"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Middle Visual Cards Overlay (Fraction Cards) -->
+    <main class="relative z-20 flex-1 flex flex-col justify-between items-center p-4 max-w-4xl mx-auto w-full pointer-events-none">
+        <!-- Top Hint Bar -->
+        <div id="hint-box" class="pointer-events-auto glass-panel px-5 py-2.5 rounded-2xl shadow-md text-center max-w-md w-full transition-all duration-300">
+            <p id="hint-text" class="text-sm font-medium text-slate-700">
+                <i class="fa-solid fa-lightbulb text-amber-500 mr-1.5"></i> เลือกเครื่องหมายเปรียบเทียบเศษส่วนทั้งสองฝั่ง
+            </p>
+        </div>
+
+        <!-- Dynamic Fraction Labels (Positions dynamically updated over 3D Scale) -->
+        <div class="w-full flex justify-between items-center px-4 md:px-12 pointer-events-none my-auto">
+            <!-- Left Fraction Card -->
+            <div class="glass-panel p-4 rounded-3xl shadow-xl border-2 border-indigo-400/50 flex flex-col items-center min-w-[100px] text-indigo-900 floating-anim">
+                <span id="left-num" class="text-3xl font-black">1</span>
+                <div class="w-10 h-1 bg-indigo-600 my-1 rounded-full"></div>
+                <span id="left-den" class="text-3xl font-black">2</span>
+            </div>
+
+            <!-- Center Question Mark / Result -->
+            <div id="center-operator" class="glass-panel w-16 h-16 rounded-3xl shadow-xl flex items-center justify-center text-3xl font-black text-slate-400 border-2 border-dashed border-slate-300">
+                ?
+            </div>
+
+            <!-- Right Fraction Card -->
+            <div class="glass-panel p-4 rounded-3xl shadow-xl border-2 border-pink-400/50 flex flex-col items-center min-w-[100px] text-pink-900 floating-anim" style="animation-delay: -1.5s;">
+                <span id="right-num" class="text-3xl font-black">3</span>
+                <div class="w-10 h-1 bg-pink-600 my-1 rounded-full"></div>
+                <span id="right-den" class="text-3xl font-black">4</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bottom Operator Buttons -->
+    <footer class="relative z-20 p-4 pb-6 max-w-xl mx-auto w-full">
+        <div class="glass-panel p-3 rounded-3xl shadow-2xl flex justify-around items-center gap-3 border border-white/50">
+            <!-- Greater Than -->
+            <button onclick="selectOperator('>')" class="scale-btn flex-1 bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-black text-3xl py-3 rounded-2xl shadow-lg flex items-center justify-center gap-1 active:shadow-inner">
+                &gt;
+            </button>
+
+            <!-- Equal -->
+            <button onclick="selectOperator('=')" class="scale-btn flex-1 bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-black text-3xl py-3 rounded-2xl shadow-lg flex items-center justify-center gap-1 active:shadow-inner">
+                =
+            </button>
+
+            <!-- Less Than -->
+            <button onclick="selectOperator('<')" class="scale-btn flex-1 bg-gradient-to-b from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 text-white font-black text-3xl py-3 rounded-2xl shadow-lg flex items-center justify-center gap-1 active:shadow-inner">
+                &lt;
+            </button>
+        </div>
+    </footer>
+
+    <!-- Explanation / Success Modal -->
+    <div id="modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm hidden">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl text-center flex flex-col items-center transform transition-all scale-95 opacity-0 duration-200" id="modal-card">
+            <div id="modal-icon" class="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-4xl mb-4 shadow-inner">
+                <i class="fa-solid fa-check"></i>
+            </div>
+            
+            <h2 id="modal-title" class="text-2xl font-bold text-slate-800 mb-2">ถูกต้องแล้ว!</h2>
+            <p id="modal-body" class="text-slate-600 text-sm mb-6 leading-relaxed">
+                เพราะว่า 3/4 มีขนาดใหญ่กว่า 1/2 เมื่อวางลงบนตาชั่ง ฝั่ง 3/4 จึงหนักกว่า!
+            </p>
+
+            <button id="modal-btn" onclick="nextQuestion()" class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-2xl shadow-lg hover:brightness-110 active:scale-95 transition">
+                ข้อต่อไป <i class="fa-solid fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game State Variables
+        let currentLevel = 1;
+        let score = 0;
+        let leftFraction = { num: 1, den: 2 };
+        let rightFraction = { num: 3, den: 4 };
+        let selectedOp = null;
+        let isARActive = false;
+        let stream = null;
+
+        // Three.js Variables
+        let scene, camera, renderer;
+        let scaleBeam, leftPanGroup, rightPanGroup;
+        let leftPieMesh, rightPieMesh;
+        let targetTilt = 0;
+        let currentTilt = 0;
+
+        // Web Audio API Synthesizer for sound effects
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+        }
+
+        function playSound(type) {
+            initAudio();
+            if (!audioCtx) return;
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'correct') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.2); // G5
+                osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.3); // C6
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                osc.start(now);
+                osc.stop(now + 0.5);
+            } else if (type === 'wrong') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.linearRampToValueAtTime(140, now + 0.25);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            } else if (type === 'click') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                osc.start(now);
+                osc.stop(now + 0.08);
+            }
+        }
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            
+            // Scene
+            scene = new THREE.Scene();
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2.5, 9);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Build Balance Scale Object
+            buildScaleModel();
+
+            // Window Resize Listener
+            window.addEventListener('resize', onWindowResize);
+
+            // Start Render Loop
+            animate();
+        }
+
+        function buildScaleModel() {
+            const scaleGroup = new THREE.Group();
+            scaleGroup.position.y = -1.2;
+
+            // Base & Stand
+            const baseGeo = new THREE.CylinderGeometry(1.5, 1.8, 0.3, 32);
+            const metallicMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6, roughness: 0.3 });
+            const baseMesh = new THREE.Mesh(baseGeo, metallicMat);
+            scaleGroup.add(baseMesh);
+
+            const pillarGeo = new THREE.CylinderGeometry(0.2, 0.3, 3.2, 24);
+            const pillarMesh = new THREE.Mesh(pillarGeo, metallicMat);
+            pillarMesh.position.y = 1.6;
+            scaleGroup.add(pillarMesh);
+
+            const fulcrumGeo = new THREE.SphereGeometry(0.4, 24, 24);
+            const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8, roughness: 0.2 });
+            const fulcrumMesh = new THREE.Mesh(fulcrumGeo, goldMat);
+            fulcrumMesh.position.y = 3.2;
+            scaleGroup.add(fulcrumMesh);
+
+            // Rotating Beam
+            scaleBeam = new THREE.Group();
+            scaleBeam.position.y = 3.2;
+
+            const beamGeo = new THREE.BoxGeometry(6.2, 0.18, 0.3);
+            const beamMesh = new THREE.Mesh(beamGeo, metallicMat);
+            scaleBeam.add(beamMesh);
+
+            // Left Pan Group
+            leftPanGroup = new THREE.Group();
+            leftPanGroup.position.x = -2.8;
+
+            const chainMat = new THREE.MeshBasicMaterial({ color: 0x94a3b8 });
+            const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8), chainMat);
+            leftChain.position.y = -0.9;
+            leftPanGroup.add(leftChain);
+
+            const panGeo = new THREE.CylinderGeometry(1.3, 1.1, 0.15, 32);
+            const leftPan = new THREE.Mesh(panGeo, goldMat);
+            leftPan.position.y = -1.8;
+            leftPanGroup.add(leftPan);
+
+            scaleBeam.add(leftPanGroup);
+
+            // Right Pan Group
+            rightPanGroup = new THREE.Group();
+            rightPanGroup.position.x = 2.8;
+
+            const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8), chainMat);
+            rightChain.position.y = -0.9;
+            rightPanGroup.add(rightChain);
+
+            const rightPan = new THREE.Mesh(panGeo, goldMat);
+            rightPan.position.y = -1.8;
+            rightPanGroup.add(rightPan);
+
+            scaleBeam.add(rightPanGroup);
+
+            scaleGroup.add(scaleBeam);
+            scene.add(scaleGroup);
+        }
+
+        function create3DPieGeometry(numerator, denominator, colorHex) {
+            const group = new THREE.Group();
+            const radius = 1.0;
+            const height = 0.35;
+            const anglePerSlice = (Math.PI * 2) / denominator;
+
+            // Material for active slices
+            const activeMat = new THREE.MeshStandardMaterial({
+                color: colorHex,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+
+            // Material for empty slices (transparent outline)
+            const emptyMat = new THREE.MeshStandardMaterial({
+                color: 0xe2e8f0,
+                transparent: true,
+                opacity: 0.25,
+                wireframe: false
+            });
+
+            for (let i = 0; i < denominator; i++) {
+                const startAngle = i * anglePerSlice;
+                const sliceGeo = new THREE.CylinderGeometry(
+                    radius, radius, height, 32, 1, false,
+                    startAngle, anglePerSlice * 0.95 // tiny gap between slices
+                );
+
+                const isFilled = i < numerator;
+                const mesh = new THREE.Mesh(sliceGeo, isFilled ? activeMat : emptyMat);
+                mesh.position.y = height / 2;
+                group.add(mesh);
+            }
+
+            return group;
+        }
+
+        function update3DFractions() {
+            // Remove old pie meshes if exist
+            if (leftPieMesh) leftPanGroup.remove(leftPieMesh);
+            if (rightPieMesh) rightPanGroup.remove(rightPieMesh);
+
+            // Create new 3D Pie charts
+            leftPieMesh = create3DPieGeometry(leftFraction.num, leftFraction.den, 0x4f46e5); // Indigo
+            leftPieMesh.position.y = -1.7;
+            leftPanGroup.add(leftPieMesh);
+
+            rightPieMesh = create3DPieGeometry(rightFraction.num, rightFraction.den, 0xec4899); // Pink
+            rightPieMesh.position.y = -1.7;
+            rightPanGroup.add(rightPieMesh);
+
+            // Reset tilt
+            targetTilt = 0;
+            currentTilt = 0;
+            if (scaleBeam) scaleBeam.rotation.z = 0;
+        }
+
+        function generateQuestion() {
+            playSound('click');
+            selectedOp = null;
+            document.getElementById('center-operator').innerText = '?';
+            document.getElementById('center-operator').className = "glass-panel w-16 h-16 rounded-3xl shadow-xl flex items-center justify-center text-3xl font-black text-slate-400 border-2 border-dashed border-slate-300";
+
+            // Difficulty levels logic
+            if (score < 3) {
+                // Level 1: Same Denominator
+                currentLevel = 1;
+                document.getElementById('level-title').innerText = "ด่านที่ 1: ตัวส่วนเท่ากัน";
+                const den = [2, 3, 4, 6, 8][Math.floor(Math.random() * 5)];
+                const n1 = Math.floor(Math.random() * den) + 1;
+                let n2 = Math.floor(Math.random() * den) + 1;
+                
+                leftFraction = { num: n1, den: den };
+                rightFraction = { num: n2, den: den };
+            } else if (score < 7) {
+                // Level 2: Same Numerator
+                currentLevel = 2;
+                document.getElementById('level-title').innerText = "ด่านที่ 2: ตัวเศษเท่ากัน";
+                const num = Math.floor(Math.random() * 3) + 1;
+                const d1 = [2, 3, 4, 6, 8][Math.floor(Math.random() * 5)];
+                let d2 = [2, 3, 4, 6, 8][Math.floor(Math.random() * 5)];
+                
+                leftFraction = { num: num, den: Math.min(num + 1, d1) };
+                rightFraction = { num: num, den: Math.min(num + 1, d2) };
+            } else {
+                // Level 3: Different Denominators / Equivalent Fractions
+                currentLevel = 3;
+                document.getElementById('level-title').innerText = "ด่านที่ 3: ตัวส่วนไม่เท่ากัน (ท้าทาย)";
+                const fList = [
+                    { n1: 1, d1: 2, n2: 2, d2: 4 }, // equal
+                    { n1: 1, d1: 3, n2: 2, d2: 3 },
+                    { n1: 3, d1: 4, n2: 1, d2: 2 },
+                    { n1: 2, d1: 5, n2: 4, d2: 5 },
+                    { n1: 1, d1: 4, n2: 2, d2: 8 }, // equal
+                    { n1: 2, d1: 3, n2: 3, d2: 4 }
+                ];
+                const choice = fList[Math.floor(Math.random() * fList.length)];
+                leftFraction = { num: choice.n1, den: choice.d1 };
+                rightFraction = { num: choice.n2, den: choice.d2 };
+            }
+
+            // Update DOM
+            document.getElementById('left-num').innerText = leftFraction.num;
+            document.getElementById('left-den').innerText = leftFraction.den;
+            document.getElementById('right-num').innerText = rightFraction.num;
+            document.getElementById('right-den').innerText = rightFraction.den;
+
+            // Update 3D Pie
+            update3DFractions();
+        }
+
+        function selectOperator(op) {
+            playSound('click');
+            selectedOp = op;
+            const centerOp = document.getElementById('center-operator');
+            centerOp.innerText = op;
+            centerOp.className = "glass-panel w-16 h-16 rounded-3xl shadow-xl flex items-center justify-center text-3xl font-black text-indigo-600 border-2 border-indigo-500 bg-indigo-50";
+
+            const valLeft = leftFraction.num / leftFraction.den;
+            const valRight = rightFraction.num / rightFraction.den;
+
+            let correctOp = '';
+            if (Math.abs(valLeft - valRight) < 0.0001) {
+                correctOp = '=';
+            } else if (valLeft > valRight) {
+                correctOp = '>';
+            } else {
+                correctOp = '<';
+            }
+
+            const isCorrect = (op === correctOp);
+
+            // Calculate scale angle based on weight difference
+            if (valLeft > valRight) {
+                targetTilt = 0.22; // Left side down
+            } else if (valLeft < valRight) {
+                targetTilt = -0.22; // Right side down
+            } else {
+                targetTilt = 0; // Balanced
+            }
+
+            // Delay feedback modal slightly for scale animation
+            setTimeout(() => {
+                showModal(isCorrect, correctOp, valLeft, valRight);
+            }, 700);
+        }
+
+        function showModal(isCorrect, correctOp, valLeft, valRight) {
+            const modal = document.getElementById('modal');
+            const modalCard = document.getElementById('modal-card');
+            const modalIcon = document.getElementById('modal-icon');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+
+            if (isCorrect) {
+                playSound('correct');
+                score += 1;
+                document.getElementById('score-text').innerText = score;
+
+                modalIcon.className = "w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-4xl mb-4 shadow-inner";
+                modalIcon.innerHTML = `<i class="fa-solid fa-check"></i>`;
+                modalTitle.innerText = "ถูกต้องแล้วเก่งมาก! 🎉";
+                
+                if (correctOp === '=') {
+                    modalBody.innerText = `ทั้งสองฝั่งมีขนาดเท่ากันพอดี (${leftFraction.num}/${leftFraction.den} = ${rightFraction.num}/${rightFraction.den}) ตาชั่งจึงสมดุล!`;
+                } else if (correctOp === '>') {
+                    modalBody.innerText = `ฝั่งซ้าย (${leftFraction.num}/${leftFraction.den}) มีขนาดใหญ่กว่าฝั่งขวา (${rightFraction.num}/${rightFraction.den}) ตาชั่งจึงเอียงลงทางซ้าย!`;
+                } else {
+                    modalBody.innerText = `ฝั่งขวา (${rightFraction.num}/${rightFraction.den}) มีขนาดใหญ่กว่าฝั่งซ้าย (${leftFraction.num}/${leftFraction.den}) ตาชั่งจึงเอียงลงทางขวา!`;
+                }
+            } else {
+                playSound('wrong');
+                modalIcon.className = "w-20 h-20 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center text-4xl mb-4 shadow-inner";
+                modalIcon.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+                modalTitle.innerText = "ยังไม่ถูกต้อง ลองใหม่อีกครั้งนะ!";
+
+                if (currentLevel === 1) {
+                    modalBody.innerText = `ข้อสังเกต: เมื่อตัวส่วนเท่ากัน ให้ดูที่ "ตัวเศษ" ยิ่งตัวเศษมาก ชิ้นส่วนจะยิ่งเยอะและหนักกว่า!`;
+                } else if (currentLevel === 2) {
+                    modalBody.innerText = `ข้อสังเกต: เมื่อตัวเศษเท่ากัน ยิ่งแบ่งจำนวนส่วนน้อยลง (ตัวส่วนน้อย) แต่ละชิ้นจะยิ่งใหญ่กว่า!`;
+                } else {
+                    modalBody.innerText = `ลองเปรียบเทียบรูปภาพเค้ก 3 มิติบนตาชั่ง เพื่อดูว่าฝั่งไหนมีพื้นที่ระบายสีมากกว่ากัน!`;
+                }
+            }
+
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modalCard.classList.remove('scale-95', 'opacity-0');
+                modalCard.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function nextQuestion() {
+            const modal = document.getElementById('modal');
+            const modalCard = document.getElementById('modal-card');
+
+            modalCard.classList.remove('scale-100', 'opacity-100');
+            modalCard.classList.add('scale-95', 'opacity-0');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                generateQuestion();
+            }, 200);
+        }
+
+        async function toggleARCamera() {
+            const video = document.getElementById('webcam');
+            const simAr = document.getElementById('simulated-ar');
+            const arBtn = document.getElementById('btn-toggle-ar');
+
+            if (!isARActive) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' }
+                    });
+                    video.srcObject = stream;
+                    video.classList.remove('hidden');
+                    simAr.classList.add('hidden');
+                    arBtn.classList.add('bg-indigo-600', 'text-white');
+                    isARActive = true;
+                } catch (err) {
+                    alert('ไม่สามารถเข้าถึงกล้องถ่ายภาพได้ หรือผู้ใช้ไม่อนุญาต ให้ใช้งานโหมดห้องเรียนจำลองแทน');
+                }
+            } else {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                video.classList.add('hidden');
+                simAr.classList.remove('hidden');
+                arBtn.classList.remove('bg-indigo-600', 'text-white');
+                isARActive = false;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Smoothly interpolate beam tilt
+            currentTilt += (targetTilt - currentTilt) * 0.08;
+            if (scaleBeam) {
+                scaleBeam.rotation.z = currentTilt;
+                
+                // Keep scale pans upright despite beam rotation
+                if (leftPanGroup) leftPanGroup.rotation.z = -currentTilt;
+                if (rightPanGroup) rightPanGroup.rotation.z = -currentTilt;
+            }
+
+            // Gentle continuous rotation of fraction pie pieces for dynamic 3D visual
+            if (leftPieMesh) leftPieMesh.rotation.y += 0.008;
+            if (rightPieMesh) rightPieMesh.rotation.y += 0.008;
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Initialize App on Page Load
+        window.onload = () => {
+            init3D();
+            generateQuestion();
+        };
+    </script>
+</body>
+</html>
